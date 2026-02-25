@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Query Assistant Agent</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>🤖 Query Assistant Agent</h1>
+            <p class="subtitle">Upload your database schema and ask questions in plain English</p>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Sidebar: Configuration -->
+            <aside class="sidebar">
+                <div class="card">
+                    <h2>📁 Database Schema</h2>
+                    <div id="schemaStatus" class="status-indicator">
+                        <span class="status-dot status-empty"></span>
+                        <span class="status-text">No schema uploaded</span>
+                    </div>
+                    
+                    <div class="upload-section">
+                        <input type="file" id="schemaFile" accept=".sql,.txt,.md,.ddl" hidden>
+                        <button class="btn btn-primary" onclick="document.getElementById('schemaFile').click()">
+                            📤 Upload Schema
+                        </button>
+                        <button class="btn btn-secondary" id="deleteSchemaBtn" onclick="deleteSchema()" disabled>
+                            🗑️ Delete
+                        </button>
+                    </div>
+
+                    <div id="schemaInfo" class="schema-info" style="display: none;">
+                        <p><strong>File:</strong> <span id="schemaFilename"></span></p>
+                        <p><strong>Tables:</strong> <span id="tableCount"></span></p>
+                        <div id="tableList" class="table-list"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>🎯 AI Model</h2>
+                    <div class="model-selection">
+                        <label class="model-option">
+                            <input type="radio" name="model" value="openai" id="modelOpenAI" checked>
+                            <span class="model-label">
+                                <span class="model-name" id="openaiModelName">OpenAI</span>
+                                <span class="model-status" id="openaiStatus">⏳</span>
+                            </span>
+                        </label>
+                        
+                        <label class="model-option">
+                            <input type="radio" name="model" value="gemini" id="modelGemini">
+                            <span class="model-label">
+                                <span class="model-name" id="geminiModelName">Gemini</span>
+                                <span class="model-status" id="geminiStatus">⏳</span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>ℹ️ Tips</h2>
+                    <ul class="tips-list">
+                        <li>Upload a SQL DDL file or text description of your schema</li>
+                        <li>Ask questions like "Show all customers" or "Get total sales by month"</li>
+                        <li>The AI will generate SQL queries you can execute</li>
+                        <li>Conversation context is maintained</li>
+                    </ul>
+                </div>
+            </aside>
+
+            <!-- Main Chat Area -->
+            <main class="chat-container">
+                <div class="card chat-card">
+                    <div id="chatMessages" class="chat-messages">
+                        <div class="welcome-message">
+                            <h2>👋 Welcome!</h2>
+                            <p>Upload a database schema to get started. Then ask questions about your data in plain English, and I'll generate SQL queries for you.</p>
+                            <div class="example-questions">
+                                <p><strong>Example questions:</strong></p>
+                                <div class="example-chip" onclick="askExample(this)">Show me all customers</div>
+                                <div class="example-chip" onclick="askExample(this)">What's the total revenue?</div>
+                                <div class="example-chip" onclick="askExample(this)">List orders from last month</div>
+                                <div class="example-chip" onclick="askExample(this)">Find top 10 products by sales</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chat-input-container">
+                        <textarea 
+                            id="questionInput" 
+                            placeholder="Ask a question about your database..." 
+                            rows="2"
+                            disabled
+                        ></textarea>
+                        <button id="sendBtn" class="btn btn-send" onclick="sendQuestion()" disabled>
+                            Send
+                        </button>
+                        <button class="btn btn-clear" onclick="clearChat()">
+                            Clear Chat
+                        </button>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
