@@ -87,28 +87,48 @@ class DABService:
         return await self._connect_direct()
     
     async def _connect_mcp(self) -> bool:
-        """Connect via MCP protocol with DAB"""
+        """Connect via MCP protocol with Python MCP server"""
         try:
-            # Check if dab-config.json exists
-            config_path = Path("dab-config.json")
-            if not config_path.exists():
-                print("dab-config.json not found, falling back to direct connection")
+            # Get Python executable path
+            import sys
+            python_exe = sys.executable
+            
+            # Path to our MCP server
+            mcp_server_path = Path(__file__).parent / "mcp_db_server.py"
+            
+            if not mcp_server_path.exists():
+                print(f"MCP server not found at {mcp_server_path}, falling back to direct connection")
                 return await self._connect_direct()
             
-            # Configure MCP server to run DAB in MCP mode
-            # Note: This requires DAB to support MCP protocol
+            # Configure MCP server to run our Python database server
             server_params = StdioServerParameters(
-                command=self.dab_command,
-                args=["start", "--mcp"],  # Hypothetical MCP mode
+                command=python_exe,
+                args=[str(mcp_server_path)],
                 env={**os.environ.copy()}
             )
             
-            read, write = await stdio_client(server_params)
+            print(f"Starting MCP server: {python_exe} {mcp_server_path}")
+            
+            # stdio_client returns a context manager, need to use it properly
+            stdio = stdio_client(server_params)
+            read, write = await stdio.__aenter__()
             self.mcp_session = ClientSession(read, write)
             await self.mcp_session.initialize()
             
-            self._is_connected = True
-            return True
+            print("MCP server initialized successfully")
+            
+            # Test the connection
+            result = await self.mcp_session.call_tool("test_connection", {})
+            if result and len(result.content) > 0:
+                import json
+                response = json.loads(result.content[0].text)
+                if response.get("connected"):
+                    print(f"MCP: Connected to database '{response.get('database')}'")
+                    self._is_connected = True
+                    return True
+            
+            print("MCP connection test failed, falling back to direct connection")
+            return await self._connect_direct()
             
         except Exception as e:
             print(f"MCP connection failed: {str(e)}, falling back to direct connection")

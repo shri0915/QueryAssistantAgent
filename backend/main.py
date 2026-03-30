@@ -229,12 +229,17 @@ async def chat(request: ChatRequest):
         
         conversation_history = storage["conversations"][session_id]
         
+        # Get database type from dab service
+        dab_service = get_dab_service()
+        database_type = dab_service.db_type if hasattr(dab_service, 'db_type') else "mssql"
+        
         # Generate SQL query
         response_data = await llm_service.generate_query(
             question=request.question,
             schema=storage["schema"],
             model=request.model,
-            conversation_history=conversation_history
+            conversation_history=conversation_history,
+            database_type=database_type
         )
         
         # Extract SQL and metadata

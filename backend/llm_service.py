@@ -52,9 +52,22 @@ class LLMService:
             genai.configure(api_key=gemini_key)
             self.gemini_model = genai.GenerativeModel(self.gemini_model_name)
     
-    def create_system_prompt(self, schema: str) -> str:
-        """Create system prompt with database schema"""
+    def create_system_prompt(self, schema: str, database_type: str = "mssql") -> str:
+        """Create system prompt with database schema and database type"""
+        
+        # Database-specific syntax notes
+        db_syntax = {
+            "mssql": "SQL Server (T-SQL) syntax. USE: GETDATE(), TOP n, DATEDIFF(), DATEADD(), LEN(), etc.",
+            "postgresql": "PostgreSQL syntax. USE: NOW(), CURRENT_DATE, LIMIT n, DATE_TRUNC(), LENGTH(), etc.",
+            "mysql": "MySQL syntax. USE: NOW(), CURDATE(), LIMIT n, DATEDIFF(), DATE_ADD(), LENGTH(), etc."
+        }
+        
+        syntax_note = db_syntax.get(database_type, db_syntax["mssql"])
+        
         return f"""You are a SQL query assistant. Your task is to convert natural language questions into SQL queries based on the provided database schema.
+
+Database Type: {database_type.upper()}
+Syntax: {syntax_note}
 
 Database Schema:
 {schema}
@@ -62,7 +75,7 @@ Database Schema:
 Rules:
 1. Only generate valid **SELECT / read-only** SQL queries based on the schema provided
 2. **NEVER** generate INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, or any other write / destructive statement
-3. Use proper SQL syntax
+3. Use proper {database_type.upper()} SQL syntax (NOT other database dialects)
 4. Include appropriate JOINs when needed
 5. Use clear table and column names from the schema
 6. Add comments to explain complex queries
@@ -83,7 +96,8 @@ Do not include any text outside the JSON object."""
         question: str, 
         schema: str, 
         model: str = "openai",
-        conversation_history: Optional[List[Dict[str, str]]] = None
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        database_type: str = "mssql"
     ) -> Dict[str, any]:
         """Generate SQL query from natural language question with safety validation and retry.
         
@@ -91,7 +105,7 @@ Do not include any text outside the JSON object."""
             Dict with keys: sql, explanation, tables_used, confidence
         """
         
-        system_prompt = self.create_system_prompt(schema)
+        system_prompt = self.create_system_prompt(schema, database_type)
         last_error = ""
 
         for attempt in range(1, self.MAX_RETRIES + 1):
