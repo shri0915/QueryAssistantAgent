@@ -319,11 +319,11 @@ function addMessage(type, content, model = null) {
                     ${model ? `<span>• ${modelNames[model] || model}</span>` : ''}
                 </div>
                 ${metadataHtml}
-                <div class="sql-query">
+                <div class="sql-query" data-sql="${escapeHtml(sqlQuery).replace(/"/g, '&quot;')}">
                     <div class="sql-query-header">
                         <span>SQL</span>
                         <button class="copy-btn" onclick="copyToClipboard(this)">Copy</button>
-                        <button class="execute-btn" onclick="executeQuery(this, \`${escapeHtml(sqlQuery).replace(/`/g, '\\`')}\`)">▶ Execute</button>
+                        <button class="execute-btn" onclick="executeQuery(this)">▶ Execute</button>
                     </div>
                     <div class="sql-code">${formatSQL(escapeHtml(sqlQuery))}</div>
                     <div class="query-results" style="display: none;"></div>
@@ -404,15 +404,24 @@ function askExample(element) {
 }
 
 // Execute SQL query against the database
-async function executeQuery(button, sql) {
-    const resultsContainer = button.closest('.sql-query').querySelector('.query-results');
+async function executeQuery(button) {
+    // Get the SQL from the data attribute
+    const sqlContainer = button.closest('.sql-query');
+    const sql = sqlContainer.getAttribute('data-sql');
+    
+    // Decode HTML entities
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = sql;
+    const decodedSql = textarea.value;
+    
+    const resultsContainer = sqlContainer.querySelector('.query-results');
     const originalText = button.textContent;
     
     // Show loading state
     button.textContent = '⏳ Executing...';
     button.disabled = true;
     resultsContainer.style.display = 'block';
-    resultsContainer.innerHTML = '<div class="loading"><div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div></div>';
+    resultsContainer.decodedSnnerHTML = '<div class="loading"><div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div></div>';
     
     try {
         const response = await fetch(`${API_BASE}/api/database/execute`, {

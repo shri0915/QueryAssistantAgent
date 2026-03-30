@@ -20,22 +20,28 @@ A powerful chat agent that understands database schemas, converts natural langua
 pip install -r requirements.txt
 ```
 
-### 2. Install Azure Data API Builder MCP Server
+### 2. Install Database Drivers (Automatic)
 
-The DAB MCP server enables direct database connectivity. Choose your installation method:
+The required drivers are installed automatically with pip:
+- **pyodbc** - for SQL Server and Azure SQL
+- **psycopg2** - for PostgreSQL
+- **mysql-connector-python** - for MySQL
 
-**Option A: Using npx (Recommended, no installation required)**
 ```bash
-# No installation needed - it will be run on-demand
-# The server will be started automatically when needed
+pip install -r requirements.txt
 ```
 
-**Option B: Global npm installation**
-```bash
-npm install -g @azure/data-api-builder-mcp
-```
+### 3. (Optional) Install Azure Data API Builder for MCP Mode
 
-**Note:** You need Node.js installed for either option. [Download Node.js](https://nodejs.org/)
+**Note:** Direct connection mode (default) works without this. Install DAB only if you plan to use MCP protocol.
+
+```bash
+# Install as .NET global tool
+dotnet tool install -g Microsoft.DataApiBuilder
+
+# Verify installation
+dab --version
+```
 
 ### 3. Configure Environment Variables
 
@@ -63,24 +69,61 @@ DAB_SERVER_ARGS=@azure/data-api-builder-mcp
 
 **Database Connection String Examples:**
 
-- **SQL Server:**
+- **SQL Server (Local with Windows Auth):**
+  ```
+  Server=localhost;Database=mydb;Trusted_Connection=True;TrustServerCertificate=True
+  ```
+
+- **SQL Server (with username/password):**
   ```
   Server=localhost;Database=mydb;User Id=sa;Password=yourpassword;TrustServerCertificate=True
   ```
 
+- **Azure SQL Database:**
+  ```
+  Server=myserver.database.windows.net;Database=mydb;User Id=username;Password=yourpassword;Encrypt=True
+  ```
+
 - **PostgreSQL:**
   ```
-  Host=localhost;Database=mydb;Username=postgres;Password=yourpassword
+  Host=localhost;Port=5432;Database=mydb;Username=postgres;Password=yourpassword
+  ```
+  
+  **Or PostgreSQL connection URI:**
+  ```
+  postgresql://username:password@localhost:5432/mydb
   ```
 
 - **MySQL:**
   ```
-  server=localhost;database=mydb;user=root;password=yourpassword
+  server=localhost;port=3306;database=mydb;user=root;password=yourpassword
   ```
 
-### 4. Configure Data API Builder
+**MCP Mode Configuration:**
 
-Create `dab-config.json` from the example:
+Set `USE_MCP=true` to enable MCP protocol (requires DAB MCP server support):
+
+**MCP Mode Configuration:**
+
+Set `USE_MCP=true` to enable MCP protocol (requires DAB MCP server support):
+
+```env
+USE_MCP=true
+DAB_CONFIG_PATH=./dab-config.json
+```
+
+**For now, use direct connection mode (default):**
+
+```env
+USE_MCP=false
+DATABASE_CONNECTION_STRING=your_connection_string
+```
+
+### 4. Configure Data API Builder (Optional - for MCP Mode)
+
+**Note:** This step is optional. The system works with direct database connections by default.
+
+When MCP protocol support is available, create `dab-config.json`:
 
 ```bash
 cp dab-config.json.example dab-config.json
@@ -117,7 +160,7 @@ Edit `dab-config.json` to match your database type and entities. Example for SQL
 }
 ```
 
-**Supported database types:** `mssql`, `postgresql`, `mysql`, `cosmosdb_nosql`
+**Supported database types in DAB:** `mssql`, `postgresql`, `mysql`, `cosmosdb_nosql`
 
 For more details, see the [Azure Data API Builder documentation](https://learn.microsoft.com/azure/data-api-builder/).
 
@@ -198,41 +241,79 @@ Once you've configured the database connection:
 │   Backend       │
 ├─────────────────┤
 │ • LLM Service   │◄─── OpenAI / Gemini
-│ • DAB Service   │◄─── MCP Protocol
+│ • DB Service    │◄─── MCP Protocol (when enabled)
+│               or│     ↓ Direct Connection (default)
 │ • Schema Parser │
 └────────┬────────┘
          │
-         │ MCP (Model Context Protocol)
-         │
-┌────────▼────────┐
-│  Azure Data     │
-│  API Builder    │
-│  MCP Server     │
-└────────┬────────┘
-         │
-         │ Native DB Protocol
-         │
-┌────────▼────────┐
-│   Database      │
-│ (SQL/Postgres/  │
-│    MySQL)       │
-└─────────────────┘
+         ├─── MCP Mode ───┐
+         │                │
+         │         ┌──────▼──────┐
+         │         │    Azure    │
+         │         │   Data API  │
+         │         │   Builder   │
+         │         └──────┬──────┘
+         │                │
+         └─── Direct ─────┤
+              Mode        │
+                          │
+                ┌─────────▼─────────┐
+                │    Database       │
+                │ • SQL Server      │
+                │ • PostgreSQL      │
+                │ • MySQL           │
+                │ • Azure SQL       │
+                └───────────────────┘
 ```
+
+### Hybrid Architecture Benefits
+
+1. **Direct Connection (Default)**
+   - Simpler setup, works immediately
+   - Native drivers for SQL Server, PostgreSQL, MySQL
+   - No additional services required
+   - Perfect for local development
+
+2. **MCP Protocol (Future-Ready)**
+   - Set `USE_MCP=true` when DAB MCP support is available
+   - Unified abstraction for all database types
+   - Works with cloud databases (Azure SQL, etc.)
+   - Supports advanced features via Data API Builder
+
+### Supported Databases
+
+- **SQL Server** (2016+) - via pyodbc
+- **Azure SQL Database** - via pyodbc
+- **PostgreSQL** (9.6+) - via psycopg2
+- **MySQL** (5.7+) - via mysql-connector-python
 
 ## Troubleshooting
 
 ### Database Connection Issues
 
-**Error: "Failed to connect to DAB MCP server"**
-- Ensure Node.js is installed: `node --version`
-- Verify `@azure/data-api-builder-mcp` is accessible
-- Check your `DATABASE_CONNECTION_STRING` in `.env`
-- Verify database server is running and accessible
+**Error: "Failed to connect to database"**
+- Verify your `DATABASE_CONNECTION_STRING` in `.env` is correct
+- Ensure database server is running and accessible
+- Check firewall rules allow connections
+- For Azure SQL: ensure your IP is whitelisted
+- For PostgreSQL/MySQL: verify port is correct (5432/3306)
 
-**Error: "Query execution error"**
-- Ensure your `dab-config.json` is properly configured
+**Test your connection string outside the app:**
+```bash
+# SQL Server (using sqlcmd)
+sqlcmd -S localhost -d master -E
+
+# PostgreSQL
+psql -h localhost -U postgres -d mydb
+
+# MySQL
+mysql -h localhost -u root -p
+```
+
+**Database driver issues:**
+- Ensure required drivers are installed: `pip install -r requirements.txt`
+- For SQL Server on Linux/Mac: install ODBC driver (see [Microsoft docs](https://learn.microsoft.com/sql/connect/odbc/))
 - Check database permissions for your connection user
-- Verify the database type matches your configuration
 
 ### AI Model Issues
 
@@ -244,15 +325,14 @@ Once you've configured the database connection:
 - Use a chat model like `gpt-4o-mini` or `gpt-4.1-mini`
 - Set `OPENAI_MODEL` in `.env` to override the default
 
-### MCP Server Issues
+### MCP Mode Issues (Advanced)
 
-**Error: "npx command not found"**
-- Install Node.js from https://nodejs.org/
-- Restart your terminal after installation
+**MCP mode is future-ready but currently uses direct connections by default.**
 
-**MCP server slow to start**
-- First run with `npx` downloads the package (one-time)
-- Consider global installation: `npm install -g @azure/data-api-builder-mcp`
+When DAB MCP server support becomes available:
+- Set `USE_MCP=true` in `.env`
+- Ensure `dab-config.json` is properly configured
+- Install DAB: `dotnet tool install -g Microsoft.DataApiBuilder`
 
 ## Security Features
 
@@ -260,12 +340,15 @@ Once you've configured the database connection:
 - ✅ **Keyword filtering**: Blocks INSERT, UPDATE, DELETE, DROP, etc.
 - ✅ **LLM validation**: Queries are reviewed by AI before execution
 - ✅ **Retry mechanism**: Failed queries are regenerated with safety feedback
-- ✅ **MCP isolation**: Database access through secure MCP protocol
+- ✅ **Multi-database support**: SQL Server, PostgreSQL, MySQL, Azure SQL
+- ✅ **MCP-ready architecture**: Easy switch to MCP protocol when available
+- ✅ **Direct connections**: Simple setup with native database drivers
 
 ## Technologies
 
 - **Backend**: FastAPI (Python)
-- **Frontend**: HTML, CSS, JavaScript
-- **AI Models**: OpenAI GPT, Google Gemini
+- **Frontend*Drivers**: pyodbc, psycopg2, mysql-connector-python
+- **Database Access**: Direct connection (default) or MCP protocol (future)
+- **Protocol**: Model Context Protocol (MCP) - ready for future integration
 - **Database Access**: Azure Data API Builder MCP Server
 - **Protocol**: Model Context Protocol (MCP)
