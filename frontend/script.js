@@ -247,7 +247,7 @@ async function sendQuestion() {
         removeMessage(loadingId);
         
         if (data.success) {
-            addMessage('assistant', data.query, selectedModel);
+            addMessage('assistant', data, selectedModel);
         } else {
             addMessage('error', data.error || 'Failed to generate query');
         }
@@ -283,6 +283,34 @@ function addMessage(type, content, model = null) {
             </div>
         `;
     } else if (type === 'assistant') {
+        // content is now the full response data object
+        const sqlQuery = content.query || content;
+        const explanation = content.explanation;
+        const tablesUsed = content.tables_used;
+        const confidence = content.confidence;
+        
+        let metadataHtml = '';
+        if (explanation || tablesUsed || confidence) {
+            metadataHtml = '<div class="query-metadata">';
+            
+            if (explanation) {
+                metadataHtml += `<div class="metadata-item"><strong>Explanation:</strong> ${escapeHtml(explanation)}</div>`;
+            }
+            
+            if (tablesUsed && tablesUsed.length > 0) {
+                const tablesList = tablesUsed.map(t => `<span class="table-tag">${escapeHtml(t)}</span>`).join(' ');
+                metadataHtml += `<div class="metadata-item"><strong>Tables:</strong> ${tablesList}</div>`;
+            }
+            
+            if (confidence) {
+                const confidenceClass = confidence === 'high' ? 'confidence-high' : 
+                                       confidence === 'low' ? 'confidence-low' : 'confidence-medium';
+                metadataHtml += `<div class="metadata-item"><strong>Confidence:</strong> <span class="${confidenceClass}">${escapeHtml(confidence)}</span></div>`;
+            }
+            
+            metadataHtml += '</div>';
+        }
+        
         messageDiv.innerHTML = `
             <div class="message-icon assistant-icon">🤖</div>
             <div class="message-content">
@@ -290,12 +318,15 @@ function addMessage(type, content, model = null) {
                     <span>Generated SQL Query</span>
                     ${model ? `<span>• ${modelNames[model] || model}</span>` : ''}
                 </div>
+                ${metadataHtml}
                 <div class="sql-query">
                     <div class="sql-query-header">
                         <span>SQL</span>
                         <button class="copy-btn" onclick="copyToClipboard(this)">Copy</button>
+                        <button class="execute-btn" onclick="executeQuery(this, \`${escapeHtml(sqlQuery).replace(/`/g, '\\`')}\`)">▶ Execute</button>
                     </div>
-                    <div class="sql-code">${formatSQL(escapeHtml(content))}</div>
+                    <div class="sql-code">${formatSQL(escapeHtml(sqlQuery))}</div>
+                    <div class="query-results" style="display: none;"></div>
                 </div>
             </div>
         `;
@@ -370,6 +401,129 @@ function askExample(element) {
     const input = document.getElementById('questionInput');
     input.value = question;
     input.focus();
+}
+
+// Execute SQL query against the database
+async function executeQuery(button, sql) {
+    const resultsContainer = button.closest('.sql-query').querySelector('.query-results');
+    const originalText = button.textContent;
+    
+    // Show loading state
+    button.textContent = '⏳ Executing...';
+    button.disabled = true;
+    resultsContainer.style.display = 'block';
+    resultsContainer.innerHTML = '<div class="loading"><div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div></div>';
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/database/execute`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                sql: sql,
+                session_id: SESSION_ID
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            displayQueryResults(resultsContainer, data);
+            button.textContent = '✓ Executed';
+            button.style.background = 'var(--success-color)';
+            
+            setTimeout(() => {
+                button.textContent = originalText;
+                button.style.background = '';
+                button.disabled = false;
+            }, 2000);
+        } else {
+            resultsContainer.innerHTML = `
+                <div class="error-message">
+                    <strong>Execution Error:</strong> ${escapeHtml(data.error || 'Unknown error')}
+                </div>
+            `;
+            button.textContent = originalText;
+            button.disabled = false;
+        }
+    } catch (error) {
+        resultsContainer.innerHTML = `
+            <div class="error-message">
+                <strong>Request Error:</strong> ${escapeHtml(error.message)}
+            </div>
+        `;
+        button.textContent = originalText;
+        button.disabled = false;
+    }
+}
+
+// Display query results in a table
+function displayQueryResults(container, data) {
+    let html = '';
+    
+    // Show execution time if available
+    if (data.execution_time_ms !== null && data.execution_time_ms !== undefined) {
+        html += `<div class="results-meta">Executed in ${data.execution_time_ms}ms`;
+        if (data.row_count !== null && data.row_count !== undefined) {
+            html += ` • ${data.row_count} row${data.row_count !== 1 ? 's' : ''}`;
+        }
+        html += '</div>';
+    }
+    
+    // Extract rows from various response formats
+    let rows = [];
+    if (data.data) {
+        if (Array.isArray(data.data)) {
+            rows = data.data;
+        } else if (data.data.data && Array.isArray(data.data.data)) {
+            rows = data.data.data;
+        } else if (data.data.rows && Array.isArray(data.data.rows)) {
+            rows = data.data.rows;
+        } else if (typeof data.data === 'object') {
+            // If it's a single object, wrap it in an array
+            rows = [data.data];
+        }
+    }
+    
+    if (rows.length === 0) {
+        html += '<div class="no-results">Query executed successfully. No rows returned.</div>';
+    } else {
+        // Get column names from first row
+        const columns = Object.keys(rows[0]);
+        
+        html += '<div class="results-table-container"><table class="results-table">';
+        
+        // Table header
+        html += '<thead><tr>';
+        columns.forEach(col => {
+            html += `<th>${escapeHtml(col)}</th>`;
+        });
+        html += '</tr></thead>';
+        
+        // Table body (limit to first 100 rows for display)
+        html += '<tbody>';
+        const displayRows = rows.slice(0, 100);
+        displayRows.forEach(row => {
+            html += '<tr>';
+            columns.forEach(col => {
+                const value = row[col];
+                const displayValue = value === null || value === undefined ? 
+                    '<span class="null-value">NULL</span>' : 
+                    escapeHtml(String(value));
+                html += `<td>${displayValue}</td>`;
+            });
+            html += '</tr>';
+        });
+        html += '</tbody>';
+        html += '</table></div>';
+        
+        if (rows.length > 100) {
+            html += `<div class="results-note">Showing first 100 of ${rows.length} rows</div>`;
+        }
+    }
+    
+    container.innerHTML = html;
 }
 
 // Copy SQL to clipboard

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from llm_service import LLMService
 from schema_parser import SchemaParser
+from dab_service import get_dab_service
 
 # Load environment variables
 load_dotenv()
@@ -32,6 +33,7 @@ app.add_middleware(
 # Initialize services
 llm_service = LLMService()
 schema_parser = SchemaParser()
+dab_service = get_dab_service()
 
 # Frontend directory path
 frontend_dir = Path(__file__).parent.parent / "frontend"
@@ -52,6 +54,9 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     query: str
+    explanation: Optional[str] = None
+    tables_used: Optional[List[str]] = None
+    confidence: Optional[str] = None
     model_used: str
     success: bool
     error: Optional[str] = None
@@ -67,6 +72,21 @@ class ModelAvailability(BaseModel):
     gemini: bool
     openai_model: Optional[str] = None
     gemini_model: Optional[str] = None
+
+class ExecuteQueryRequest(BaseModel):
+    sql: str
+    session_id: Optional[str] = "default"
+
+class ExecuteQueryResponse(BaseModel):
+    success: bool
+    data: Optional[Any] = None
+    row_count: Optional[int] = None
+    error: Optional[str] = None
+    execution_time_ms: Optional[float] = None
+
+class DatabaseConnectionStatus(BaseModel):
+    connected: bool
+    message: str
 
 
 # Mount static files for frontend
@@ -210,12 +230,18 @@ async def chat(request: ChatRequest):
         conversation_history = storage["conversations"][session_id]
         
         # Generate SQL query
-        sql_query = await llm_service.generate_query(
+        response_data = await llm_service.generate_query(
             question=request.question,
             schema=storage["schema"],
             model=request.model,
             conversation_history=conversation_history
         )
+        
+        # Extract SQL and metadata
+        sql_query = response_data.get("sql", "")
+        explanation = response_data.get("explanation", "")
+        tables_used = response_data.get("tables_used", [])
+        confidence = response_data.get("confidence", "medium")
         
         # Update conversation history
         conversation_history.append({"role": "user", "content": request.question})
@@ -227,6 +253,9 @@ async def chat(request: ChatRequest):
         
         return ChatResponse(
             query=sql_query,
+            explanation=explanation,
+            tables_used=tables_used,
+            confidence=confidence,
             model_used=request.model,
             success=True
         )
@@ -259,6 +288,86 @@ async def delete_schema():
     return {"success": True, "message": "Schema deleted"}
 
 
+@app.get("/api/database/test-connection", response_model=DatabaseConnectionStatus)
+async def test_database_connection():
+    """Test connection to the database via DAB MCP server"""
+    try:
+        success, message = await dab_service.test_connection()
+        return DatabaseConnectionStatus(connected=success, message=message)
+    except Exception as e:
+        return DatabaseConnectionStatus(
+            connected=False, 
+            message=f"Connection test failed: {str(e)}"
+        )
+
+
+@app.post("/api/database/execute", response_model=ExecuteQueryResponse)
+async def execute_query(request: ExecuteQueryRequest):
+    """Execute SQL query against the database via DAB MCP server"""
+    import time
+    
+    try:
+        # Check if query is provided
+        if not request.sql or not request.sql.strip():
+            raise HTTPException(status_code=400, detail="SQL query is required")
+        
+        # Start timing
+        start_time = time.time()
+        
+        # Execute the query
+        success, result = await dab_service.execute_query(request.sql)
+        
+        # Calculate execution time
+        execution_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+        
+        if not success:
+            return ExecuteQueryResponse(
+                success=False,
+                error=str(result),
+                execution_time_ms=execution_time
+            )
+        
+        # Determine row count if possible
+        row_count = None
+        if isinstance(result, dict):
+            if "data" in result and isinstance(result["data"], list):
+                row_count = len(result["data"])
+            elif "rows" in result:
+                row_count = len(result["rows"]) if isinstance(result["rows"], list) else None
+        elif isinstance(result, list):
+            row_count = len(result)
+        
+        return ExecuteQueryResponse(
+            success=True,
+            data=result,
+            row_count=row_count,
+            execution_time_ms=round(execution_time, 2)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        return ExecuteQueryResponse(
+            success=False,
+            error=f"Query execution failed: {str(e)}"
+        )
+
+
+@app.get("/api/database/schema")
+async def get_database_schema():
+    """Get schema information from the database via DAB MCP server"""
+    try:
+        success, schema_info = await dab_service.get_schema_info()
+        
+        if not success:
+            return {"success": False, "error": str(schema_info)}
+        
+        return {"success": True, "schema": schema_info}
+        
+    except Exception as e:
+        return {"success": False, "error": f"Failed to get schema: {str(e)}"}
+
+
 if __name__ == "__main__":
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", 8000))
@@ -273,6 +382,7 @@ API Docs: http://{host}:{port}/docs
 
 OpenAI: {'✓ Configured' if llm_service.is_openai_available() else '✗ Not configured'}
 Gemini: {'✓ Configured' if llm_service.is_gemini_available() else '✗ Not configured'}
+DAB MCP: Ready (test connection via API)
 
 """)
     

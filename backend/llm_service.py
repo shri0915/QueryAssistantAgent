@@ -3,8 +3,10 @@ LLM Service for handling OpenAI and Gemini API interactions
 """
 import os
 import re
+import json
 from typing import Optional, List, Dict, Tuple
 from openai import OpenAI
+from pydantic import BaseModel, Field
 
 # Try to import Gemini, but make it optional
 try:
@@ -13,6 +15,14 @@ try:
 except ImportError:
     GEMINI_AVAILABLE = False
     genai = None
+
+
+class SQLResponse(BaseModel):
+    """Structured response model for SQL query generation"""
+    sql: str = Field(..., description="The generated SQL query")
+    explanation: str = Field(..., description="Brief explanation of what the query does")
+    tables_used: List[str] = Field(default_factory=list, description="List of tables referenced in the query")
+    confidence: str = Field(default="high", description="Confidence level: high, medium, or low")
 
 
 class LLMService:
@@ -56,10 +66,17 @@ Rules:
 4. Include appropriate JOINs when needed
 5. Use clear table and column names from the schema
 6. Add comments to explain complex queries
-7. Return ONLY the SQL query, no explanations unless specifically asked
-8. If the question cannot be answered with the given schema, explain why
+7. If the question cannot be answered with the given schema, explain why
 
-Format your response as a clean SQL query that can be executed directly."""
+You must respond with a JSON object in this exact format:
+{{
+  "sql": "your SQL query here",
+  "explanation": "brief explanation of what the query does",
+  "tables_used": ["table1", "table2"],
+  "confidence": "high/medium/low"
+}}
+
+Do not include any text outside the JSON object."""
 
     async def generate_query(
         self, 
@@ -67,8 +84,12 @@ Format your response as a clean SQL query that can be executed directly."""
         schema: str, 
         model: str = "openai",
         conversation_history: Optional[List[Dict[str, str]]] = None
-    ) -> str:
-        """Generate SQL query from natural language question with safety validation and retry."""
+    ) -> Dict[str, any]:
+        """Generate SQL query from natural language question with safety validation and retry.
+        
+        Returns:
+            Dict with keys: sql, explanation, tables_used, confidence
+        """
         
         system_prompt = self.create_system_prompt(schema)
         last_error = ""
@@ -84,12 +105,15 @@ Format your response as a clean SQL query that can be executed directly."""
                 )
 
             if model == "openai":
-                sql = await self._generate_with_openai(effective_question, system_prompt, conversation_history)
+                response_data = await self._generate_with_openai(effective_question, system_prompt, conversation_history)
             elif model == "gemini":
-                sql = await self._generate_with_gemini(effective_question, system_prompt, conversation_history)
+                response_data = await self._generate_with_gemini(effective_question, system_prompt, conversation_history)
             else:
                 raise ValueError(f"Unsupported model: {model}")
 
+            # Extract SQL from structured response
+            sql = response_data.get("sql", "")
+            
             # --- Validation ---
             is_safe, reason = self._keyword_safety_check(sql)
             if not is_safe:
@@ -101,7 +125,7 @@ Format your response as a clean SQL query that can be executed directly."""
                 last_error = reason
                 continue
 
-            return sql  # passed both checks
+            return response_data  # passed both checks
 
         raise Exception(
             f"Query generation failed after {self.MAX_RETRIES} attempts. "
@@ -163,8 +187,8 @@ Format your response as a clean SQL query that can be executed directly."""
         question: str, 
         system_prompt: str,
         conversation_history: Optional[List[Dict[str, str]]] = None
-    ) -> str:
-        """Generate query using OpenAI"""
+    ) -> Dict[str, any]:
+        """Generate query using OpenAI with structured JSON output"""
         if not self.openai_client:
             raise ValueError("OpenAI API key not configured")
         
@@ -180,9 +204,25 @@ Format your response as a clean SQL query that can be executed directly."""
             response = self.openai_client.chat.completions.create(
                 model=self.openai_model,
                 messages=messages,
-                max_completion_tokens=1000
+                max_completion_tokens=1000,
+                response_format={"type": "json_object"}  # Force JSON output
             )
-            return response.choices[0].message.content.strip()
+            content = response.choices[0].message.content.strip()
+            
+            # Parse JSON response
+            try:
+                data = json.loads(content)
+                # Validate with Pydantic model
+                validated = SQLResponse(**data)
+                return validated.model_dump()
+            except (json.JSONDecodeError, Exception) as parse_error:
+                # Fallback: treat as plain SQL
+                return {
+                    "sql": content,
+                    "explanation": "Generated SQL query",
+                    "tables_used": [],
+                    "confidence": "medium"
+                }
         except Exception as e:
             error_msg = str(e)
             if "not a chat model" in error_msg:
@@ -197,8 +237,8 @@ Format your response as a clean SQL query that can be executed directly."""
         question: str, 
         system_prompt: str,
         conversation_history: Optional[List[Dict[str, str]]] = None
-    ) -> str:
-        """Generate query using Gemini"""
+    ) -> Dict[str, any]:
+        """Generate query using Gemini with structured JSON output"""
         if not GEMINI_AVAILABLE:
             raise ValueError("Gemini library not installed. Install with: pip install google-generativeai")
         if not self.gemini_model:
@@ -212,7 +252,7 @@ Format your response as a clean SQL query that can be executed directly."""
                 role = "User" if msg["role"] == "user" else "Assistant"
                 full_prompt += f"{role}: {msg['content']}\n"
         
-        full_prompt += f"\nUser Question: {question}\n\nSQL Query:"
+        full_prompt += f"\nUser Question: {question}\n\nRespond with JSON only:"
         
         try:
             response = self.gemini_model.generate_content(
@@ -220,9 +260,25 @@ Format your response as a clean SQL query that can be executed directly."""
                 generation_config=genai.types.GenerationConfig(
                     temperature=0.1,
                     max_output_tokens=1000,
+                    response_mime_type="application/json"  # Force JSON output
                 )
             )
-            return response.text.strip()
+            content = response.text.strip()
+            
+            # Parse JSON response
+            try:
+                data = json.loads(content)
+                # Validate with Pydantic model
+                validated = SQLResponse(**data)
+                return validated.model_dump()
+            except (json.JSONDecodeError, Exception) as parse_error:
+                # Fallback: treat as plain SQL
+                return {
+                    "sql": content,
+                    "explanation": "Generated SQL query",
+                    "tables_used": [],
+                    "confidence": "medium"
+                }
         except Exception as e:
             raise Exception(f"Gemini API error: {str(e)}")
     

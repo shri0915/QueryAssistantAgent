@@ -3,9 +3,11 @@
 ## Prerequisites
 
 1. Python 3.8 or higher
-2. API keys for at least one of:
+2. **Node.js** (for database connectivity) - [Download](https://nodejs.org/)
+3. API keys for at least one of:
    - OpenAI API key (for GPT-4)
    - Google Gemini API key
+4. **(Optional)** Access to a database (SQL Server, PostgreSQL, or MySQL) for query execution
 
 ## Installation Steps
 
@@ -15,7 +17,7 @@
 pip install -r requirements.txt
 ```
 
-### 2. Configure API Keys
+### 2. Configure API Keys and Database
 
 Create a `.env` file in the project root:
 
@@ -23,12 +25,31 @@ Create a `.env` file in the project root:
 cp .env.example .env
 ```
 
-Edit the `.env` file and add your API keys:
+Edit the `.env` file and add your settings:
 
-```
+```env
+# AI Model API Keys (required - at least one)
 OPENAI_API_KEY=sk-your-openai-key-here
 GEMINI_API_KEY=your-gemini-key-here
+
+# Database Connection (optional - required only for query execution)
+DATABASE_CONNECTION_STRING=Server=localhost;Database=mydb;User Id=sa;Password=yourpass;TrustServerCertificate=True
 ```
+
+**Note:** If you skip the database configuration, you can still generate SQL queries but won't be able to execute them.
+
+### 2b. Configure Database Connection (Optional)
+
+If you want to execute queries against a real database:
+
+1. Copy the DAB config example:
+   ```bash
+   cp dab-config.json.example dab-config.json
+   ```
+
+2. Edit `dab-config.json` to match your database type (`mssql`, `postgresql`, or `mysql`)
+
+3. Ensure your database is running and accessible
 
 ### 3. Run the Application
 
@@ -78,9 +99,16 @@ Type your questions in plain English, for example:
 ### Step 4: Use the Generated SQL
 
 The AI will generate SQL queries that you can:
-- Copy to clipboard with one click
-- Run on your actual database
+- **Copy** to clipboard with one click
+- **Execute** directly against your database (if configured)
 - Modify as needed
+
+To execute a query:
+1. Click the **"▶ Execute"** button next to the generated SQL
+2. View results in a formatted table
+3. See execution time and row count
+
+**Safety Note:** Only SELECT queries can be executed. Write operations (INSERT, UPDATE, DELETE) are automatically blocked.
 
 ## Tips
 
@@ -98,6 +126,33 @@ The AI will generate SQL queries that you can:
 ### "Please upload a database schema first"
 - You need to upload a schema file before asking questions
 - Use one of the example schemas to get started
+
+### "Failed to connect to DAB MCP server" or Execute button not working
+- Install Node.js if not already installed: https://nodejs.org/
+- Verify your `DATABASE_CONNECTION_STRING` in `.env` is correct
+- Ensure your database server is running
+- Check that your database user has SELECT permissions
+- Test connection using: `curl http://localhost:8000/api/database/test-connection`
+
+### "npx command not found"
+- Install Node.js from https://nodejs.org/
+- Restart your terminal/command prompt after installation
+- Verify with: `node --version` and `npx --version`
+
+## Quick Test
+
+Once everything is set up, try this workflow:
+
+1. Upload `examples/ecommerce_schema.sql` or `examples/library_schema.sql`
+2. Ask: "Show me all tables in this database"
+3. Click "▶ Execute" if you have a database connected
+4. See the SQL query and results!
+
+## What's Next?
+
+- Read the full [README.md](README.md) for detailed setup and features
+- Explore the [Azure Data API Builder documentation](https://learn.microsoft.com/azure/data-api-builder/) for advanced database configuration
+- Check your database schema and start asking questions!
 
 ### Schema Upload Failed
 - Ensure the file is a text file (UTF-8 encoded)
