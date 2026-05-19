@@ -49,7 +49,7 @@ storage = {
 # Pydantic models
 class ChatRequest(BaseModel):
     question: str
-    model: str = "openai"  # "openai" or "gemini"
+    model: str = "openai"  # "openai", "gemini", or "local"
     session_id: Optional[str] = "default"
 
 class ChatResponse(BaseModel):
@@ -70,8 +70,11 @@ class SchemaInfo(BaseModel):
 class ModelAvailability(BaseModel):
     openai: bool
     gemini: bool
+    local: bool
     openai_model: Optional[str] = None
     gemini_model: Optional[str] = None
+    local_model: Optional[str] = None
+    local_url: Optional[str] = None
 
 class ExecuteQueryRequest(BaseModel):
     sql: str
@@ -128,7 +131,8 @@ async def health_check():
     return {
         "status": "healthy",
         "openai_configured": llm_service.is_openai_available(),
-        "gemini_configured": llm_service.is_gemini_available()
+        "gemini_configured": llm_service.is_gemini_available(),
+        "local_configured": llm_service.is_local_llm_available()
     }
 
 
@@ -138,8 +142,11 @@ async def get_available_models():
     return ModelAvailability(
         openai=llm_service.is_openai_available(),
         gemini=llm_service.is_gemini_available(),
+        local=llm_service.is_local_llm_available(),
         openai_model=llm_service.openai_model,
-        gemini_model=llm_service.gemini_model_name
+        gemini_model=llm_service.gemini_model_name,
+        local_model=llm_service.local_model_name,
+        local_url=llm_service.local_llm_url
     )
 
 
@@ -220,6 +227,15 @@ async def chat(request: ChatRequest):
             raise HTTPException(
                 status_code=400,
                 detail="Gemini API key not configured. Please set GEMINI_API_KEY in .env file"
+            )
+
+        if request.model == "local" and not llm_service.is_local_llm_available():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Local LLM is not reachable. Please start your local LLM server and verify "
+                    "LOCAL_LLM_URL/LOCAL_LLM_MODEL in .env"
+                )
             )
         
         # Get or create conversation history

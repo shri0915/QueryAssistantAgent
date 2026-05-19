@@ -26,7 +26,7 @@ function setupEventListeners() {
 }
 
 // Store model names globally so chat messages can reference them
-let modelNames = { openai: 'OpenAI', gemini: 'Gemini' };
+let modelNames = { openai: 'OpenAI', gemini: 'Gemini', local: 'Local LLM' };
 
 // Check which AI models are available
 async function checkModelAvailability() {
@@ -37,10 +37,12 @@ async function checkModelAvailability() {
         // Store model names from backend
         if (data.openai_model) modelNames.openai = data.openai_model;
         if (data.gemini_model) modelNames.gemini = data.gemini_model;
+        if (data.local_model) modelNames.local = data.local_model;
         
         // Update labels with actual model names
         document.getElementById('openaiModelName').textContent = `OpenAI (${modelNames.openai})`;
         document.getElementById('geminiModelName').textContent = `Gemini (${modelNames.gemini})`;
+        document.getElementById('localModelName').textContent = `Local (${modelNames.local})`;
         
         // Update OpenAI status
         const openaiStatus = document.getElementById('openaiStatus');
@@ -65,15 +67,34 @@ async function checkModelAvailability() {
             geminiStatus.style.color = 'var(--error-color)';
             geminiRadio.disabled = true;
         }
-        
-        // If OpenAI is not available but Gemini is, select Gemini
-        if (!data.openai && data.gemini) {
-            geminiRadio.checked = true;
+
+        // Update Local LLM status
+        const localStatus = document.getElementById('localStatus');
+        const localRadio = document.getElementById('modelLocal');
+        if (data.local) {
+            localStatus.textContent = '✓';
+            localStatus.style.color = 'var(--success-color)';
+        } else {
+            localStatus.textContent = '✗';
+            localStatus.style.color = 'var(--error-color)';
+            localRadio.disabled = true;
         }
         
-        // If neither is available, show warning
-        if (!data.openai && !data.gemini) {
-            showNotification('No AI models configured. Please set API keys in .env file.', 'error');
+        // Choose first available model if currently selected one is unavailable
+        const selectedRadio = document.querySelector('input[name="model"]:checked');
+        if (selectedRadio && selectedRadio.disabled) {
+            if (data.openai) {
+                openaiRadio.checked = true;
+            } else if (data.gemini) {
+                geminiRadio.checked = true;
+            } else if (data.local) {
+                localRadio.checked = true;
+            }
+        }
+        
+        // If none are available, show warning
+        if (!data.openai && !data.gemini && !data.local) {
+            showNotification('No AI models available. Configure API keys or start a local LLM server.', 'error');
         }
     } catch (error) {
         console.error('Error checking model availability:', error);

@@ -7,6 +7,7 @@
 3. API keys for at least one of:
    - OpenAI API key (for GPT-4)
    - Google Gemini API key
+   - Or a local LLM server (Ollama-compatible)
 4. **(Optional)** Access to a database (SQL Server, PostgreSQL, or MySQL) for query execution
 
 ## Installation Steps
@@ -31,6 +32,11 @@ Edit the `.env` file and add your settings:
 # AI Model API Keys (required - at least one)
 OPENAI_API_KEY=sk-your-openai-key-here
 GEMINI_API_KEY=your-gemini-key-here
+
+# Local LLM (optional, Ollama-compatible)
+LOCAL_LLM_URL=http://localhost:11434/api/chat
+LOCAL_LLM_MODEL=gemma3:4b
+LOCAL_LLM_TIMEOUT_SECONDS=60
 
 # Database Connection (optional - required only for query execution)
 DATABASE_CONNECTION_STRING=Server=localhost;Database=mydb;User Id=sa;Password=yourpass;TrustServerCertificate=True
@@ -78,6 +84,7 @@ Click "Upload Schema" and select a database schema file:
 Choose between:
 - **OpenAI GPT-4**: More accurate, better at complex queries
 - **Google Gemini**: Fast, good for most queries
+- **Local LLM**: Runs locally (for example via Ollama)
 
 ### Step 3: Ask Questions
 
@@ -120,7 +127,7 @@ To execute a query:
 ## Troubleshooting
 
 ### "No AI models configured"
-- Make sure you've added at least one API key to the `.env` file
+- Make sure you've added at least one API key to the `.env` file or started your local LLM server
 - Restart the server after adding API keys
 
 ### "Please upload a database schema first"

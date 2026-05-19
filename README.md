@@ -1,11 +1,11 @@
 # Query Assistant Agent
 
-A powerful chat agent that understands database schemas, converts natural language questions into SQL queries, and executes them against your database using Azure Data API Builder MCP. Supports both OpenAI and Google Gemini.
+A powerful chat agent that understands database schemas, converts natural language questions into SQL queries, and executes them against your database using Azure Data API Builder MCP. Supports OpenAI, Google Gemini, and local LLMs.
 
 ## Features
 
 - 📊 Upload database schema files (SQL, ERD diagrams, text descriptions)
-- 🤖 Choose between OpenAI GPT or Google Gemini
+- 🤖 Choose between OpenAI, Google Gemini, or a local LLM
 - 💬 Ask questions in plain English
 - 🔍 Get SQL queries as responses
 - ▶️ **Execute queries directly against your database**
@@ -57,6 +57,11 @@ Edit `.env` with your settings:
 # AI Model API Keys (configure at least one)
 OPENAI_API_KEY=your_openai_api_key_here
 GEMINI_API_KEY=your_gemini_api_key_here
+
+# Local LLM (optional, for Ollama-compatible servers)
+LOCAL_LLM_URL=http://localhost:11434/api/chat
+LOCAL_LLM_MODEL=gemma3:4b
+LOCAL_LLM_TIMEOUT_SECONDS=60
 
 # Database Connection (required for query execution)
 DATABASE_CONNECTION_STRING=your_database_connection_string
@@ -179,7 +184,7 @@ Open your browser to `http://localhost:8000`
 ### Basic Workflow
 
 1. **Upload Schema** - Upload your database schema file (SQL DDL, text description, or diagram)
-2. **Select AI Model** - Choose your preferred AI model (OpenAI or Gemini)
+2. **Select AI Model** - Choose your preferred AI model (OpenAI, Gemini, or Local)
 3. **Ask Questions** - Type questions about your database in natural language
 4. **Get SQL Queries** - Receive generated SQL queries with explanations
 5. **Execute Queries** - Click the "▶ Execute" button to run queries against your database

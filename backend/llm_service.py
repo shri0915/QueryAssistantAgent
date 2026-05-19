@@ -1,10 +1,13 @@
 """
 LLM Service for handling OpenAI and Gemini API interactions
 """
+import asyncio
 import os
 import re
 import json
 from typing import Optional, List, Dict, Tuple
+from urllib import request as urllib_request
+from urllib import error as urllib_error
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
@@ -40,6 +43,9 @@ class LLMService:
         self.openai_model = os.getenv("OPENAI_MODEL", "gpt-5.2-chat-latest")
         self.gemini_model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         self.gemini_model = None
+        self.local_model_name = os.getenv("LOCAL_LLM_MODEL", "gemma3:4b")
+        self.local_llm_url = os.getenv("LOCAL_LLM_URL", "http://localhost:11434/api/chat")
+        self.local_timeout_seconds = int(os.getenv("LOCAL_LLM_TIMEOUT_SECONDS", "60"))
         
         # Initialize OpenAI
         openai_key = os.getenv("OPENAI_API_KEY")
@@ -122,6 +128,8 @@ Do not include any text outside the JSON object."""
                 response_data = await self._generate_with_openai(effective_question, system_prompt, conversation_history)
             elif model == "gemini":
                 response_data = await self._generate_with_gemini(effective_question, system_prompt, conversation_history)
+            elif model == "local":
+                response_data = await self._generate_with_local_llm(effective_question, system_prompt, conversation_history)
             else:
                 raise ValueError(f"Unsupported model: {model}")
 
@@ -182,10 +190,20 @@ Do not include any text outside the JSON object."""
                     "You are a SQL security reviewer. Respond with SAFE or UNSAFE: <reason>.",
                     None,
                 )
+            elif model == "local":
+                result = await self._generate_with_local_llm(
+                    validation_prompt,
+                    "You are a SQL security reviewer. Respond with SAFE or UNSAFE: <reason>.",
+                    None,
+                )
             else:
                 return True, ""  # fallback: skip LLM validation for unknown model
 
-            verdict = result.strip()
+            verdict = result.get("sql", "") if isinstance(result, dict) else ""
+            if not verdict:
+                return True, ""
+
+            verdict = verdict.strip()
             if verdict.upper().startswith("SAFE"):
                 return True, ""
             # Extract reason after "UNSAFE:"
@@ -222,14 +240,14 @@ Do not include any text outside the JSON object."""
                 response_format={"type": "json_object"}  # Force JSON output
             )
             content = response.choices[0].message.content.strip()
-            
+
             # Parse JSON response
             try:
                 data = json.loads(content)
                 # Validate with Pydantic model
                 validated = SQLResponse(**data)
                 return validated.model_dump()
-            except (json.JSONDecodeError, Exception) as parse_error:
+            except (json.JSONDecodeError, Exception):
                 # Fallback: treat as plain SQL
                 return {
                     "sql": content,
@@ -278,14 +296,14 @@ Do not include any text outside the JSON object."""
                 )
             )
             content = response.text.strip()
-            
+
             # Parse JSON response
             try:
                 data = json.loads(content)
                 # Validate with Pydantic model
                 validated = SQLResponse(**data)
                 return validated.model_dump()
-            except (json.JSONDecodeError, Exception) as parse_error:
+            except (json.JSONDecodeError, Exception):
                 # Fallback: treat as plain SQL
                 return {
                     "sql": content,
@@ -295,6 +313,103 @@ Do not include any text outside the JSON object."""
                 }
         except Exception as e:
             raise Exception(f"Gemini API error: {str(e)}")
+
+    async def _generate_with_local_llm(
+        self,
+        question: str,
+        system_prompt: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None
+    ) -> Dict[str, any]:
+        """Generate query using a local Ollama-compatible chat endpoint."""
+        if not self.local_llm_url:
+            raise ValueError("Local LLM URL not configured")
+        if not self.local_model_name:
+            raise ValueError("Local LLM model not configured")
+
+        messages = [{"role": "system", "content": system_prompt}]
+        if conversation_history:
+            messages.extend(conversation_history)
+        messages.append({"role": "user", "content": question})
+
+        payload = {
+            "model": self.local_model_name,
+            "messages": messages,
+            "stream": False,
+        }
+
+        try:
+            response_json = await asyncio.to_thread(
+                self._http_post_json,
+                self.local_llm_url,
+                payload,
+                self.local_timeout_seconds,
+            )
+            content = self._extract_local_content(response_json)
+
+            # Parse JSON response
+            try:
+                data = json.loads(content)
+                # Validate with Pydantic model
+                validated = SQLResponse(**data)
+                return validated.model_dump()
+            except (json.JSONDecodeError, Exception):
+                # Fallback: treat as plain SQL
+                return {
+                    "sql": content,
+                    "explanation": "Generated SQL query",
+                    "tables_used": [],
+                    "confidence": "medium"
+                }
+        except Exception as e:
+            raise Exception(f"Local LLM API error: {str(e)}")
+
+    def _http_post_json(self, url: str, payload: Dict[str, any], timeout: int) -> Dict[str, any]:
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib_request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib_request.urlopen(req, timeout=timeout) as response:
+            body = response.read().decode("utf-8")
+            return json.loads(body)
+
+    def _extract_local_content(self, response_json: Dict[str, any]) -> str:
+        message = response_json.get("message")
+        if isinstance(message, dict) and isinstance(message.get("content"), str):
+            content = message["content"]
+        elif isinstance(response_json.get("response"), str):
+            content = response_json["response"]
+        else:
+            content = json.dumps(response_json)
+
+        # Strip markdown code fences that local LLMs often wrap JSON in
+        # e.g. ```json\n{...}\n``` or ```\n{...}\n```
+        content = content.strip()
+        if content.startswith("```"):
+            content = re.sub(r'^```(?:json)?\s*', '', content)
+            content = re.sub(r'\s*```$', '', content)
+            content = content.strip()
+
+        return content
+
+    def _local_tags_url(self) -> str:
+        if "/api/" in self.local_llm_url:
+            base = self.local_llm_url.split("/api/", 1)[0]
+            return f"{base}/api/tags"
+        return self.local_llm_url
+
+    def _check_local_llm_server(self) -> bool:
+        try:
+            req = urllib_request.Request(self._local_tags_url(), method="GET")
+            with urllib_request.urlopen(req, timeout=2) as response:
+                status_code = getattr(response, "status", 200)
+                return 200 <= status_code < 300
+        except (urllib_error.URLError, TimeoutError, ValueError):
+            return False
+        except Exception:
+            return False
     
     def is_openai_available(self) -> bool:
         """Check if OpenAI is configured and available"""
@@ -303,3 +418,9 @@ Do not include any text outside the JSON object."""
     def is_gemini_available(self) -> bool:
         """Check if Gemini is configured and available"""
         return GEMINI_AVAILABLE and self.gemini_model is not None
+
+    def is_local_llm_available(self) -> bool:
+        """Check if local LLM endpoint appears reachable."""
+        if not self.local_model_name or not self.local_llm_url:
+            return False
+        return self._check_local_llm_server()
